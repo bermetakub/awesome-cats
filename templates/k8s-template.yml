@@ -1,0 +1,127 @@
+.connect-gke:
+  image:
+    name: google/cloud-sdk:latest
+    entrypoint:
+      - '/usr/bin/env'
+      - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  before_script:
+    - export GOOGLE_APPLICATION_CREDENTIALS=$CI_PROJECT_DIR/key.json
+    - echo "$GOOGLE_CREDENTIALS" > "$GOOGLE_APPLICATION_CREDENTIALS"
+    - gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+    - gcloud config set project $GCP_PROJECT_ID
+    - gcloud container clusters get-credentials bermet --zone $GCP_ZONE --project $GCP_PROJECT_ID
+    - kubectl get nodes
+
+variables:
+  HELM_VERSION: "v3.14.0"
+
+create_table:
+  extends: .connect-gke
+  stage: create-table
+  script:
+    - apt-get install -y postgresql postgresql-contrib
+    - cd Terraform 
+    - export PGPASSWORD=$PGPASSWORD
+    - echo "Creating tables..."
+    - psql -h $PGHOST -p 5432 -U $PGUSER -d $PGDATABASE -f ./modules/database/create-tables.sql
+    - kubectl create ns monitoring
+    - kubectl create secret generic db-credentials --from-literal=database=$PGDATABASE --from-literal=hostname=$PGHOST --from-literal=password=$PGPASSWORD --from-literal=username=$PGUSER 
+    - kubectl create secret generic db-credentials --from-literal=database=$PGDATABASE --from-literal=hostname=$PGHOST --from-literal=password=$PGPASSWORD --from-literal=username=$PGUSER -n monitoring
+  when: manual
+
+configuring_helm:
+  extends: .connect-gke
+  stage: helm-install
+  script:
+    - curl -sSL https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz -o helm.tar.gz
+    - tar -zxvf helm.tar.gz
+    - mv linux-amd64/helm /usr/local/bin/helm
+    - kubectl create secret generic external-dns-gcp --from-file=credentials.json=$CI_PROJECT_DIR/key.json
+    - helm version
+    - helm repo add bitnami https://charts.bitnami.com/bitnami
+    - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+    - helm install my-nginx-ingress ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace
+    - helm upgrade --install external-dns bitnami/external-dns --set provider=google --set google.project=$GCP_PROJECT_ID --set google.serviceAccountSecret=external-dns-gcp --set txtOwnerId="api" --set policy=sync
+  when: manual
+
+1-install-argocd:
+  extends: .connect-gke
+  stage: configure-argocd
+  script:
+    - curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v2.7.8/argocd-linux-amd64
+    - chmod +x ./argocd-linux-amd64
+    - mv ./argocd-linux-amd64 /usr/local/bin/argocd
+    - kubectl create namespace argocd
+    - kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+    - sleep 10
+    - kubectl port-forward -n argocd svc/argocd-server 8080:443 &
+    - sleep 10
+    # - kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+    - argocd admin initial-password -n argocd
+    # - kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+  when: manual
+
+2-argo-project-application:
+  extends: .connect-gke
+  stage: configure-argocd
+  script:
+    - kubectl apply -f argorole-binding.yml
+    - kubectl apply -f application-argocd.yml
+    - kubectl apply -f prometheus-application.yml
+    - kubectl rollout status -n argocd deployment/argocd-server
+    - kubectl apply -f servicemonitor.yaml
+  when: manual
+
+exporters:
+  extends: .connect-gke
+  stage: install-exporters
+  script:
+    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - helm version
+    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    - helm repo update
+    # - kubectl create ns monitoring
+    # - kubectl create secret generic db-credentials --from-literal=database=$PGDATABASE --from-literal=hostname=$PGHOST --from-literal=password=$PGPASSWORD --from-literal=username=$PGUSER -n monitoring
+    # - kubectl apply -f prometheus-application.yml 
+    # - kubectl rollout status -n argocd deployment/argocd-server
+    # - helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.release=prometheus
+    - helm install postgres-exporter prometheus-community/prometheus-postgres-exporter --namespace monitoring --set postgresUser=$PGUSER --set postgresPassword=$PGPASSWORD --set postgresDatabase=postgres  --set postgresHost=$PGHOST --set serviceMonitor.enabled=true --set serviceMonitor.selector.release=prometheus --set prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.release=prometheus
+    - until kubectl get svc -n monitoring postgres-exporter-prometheus-postgres-exporter; do echo "Waiting for postgres-exporter-prometheus-postgres-exporter service..."; sleep 10; done
+    - export POSTGRES_EXPORTER_IP=$(kubectl get svc -n monitoring postgres-exporter-prometheus-postgres-exporter -o jsonpath='{.spec.clusterIP}')
+    - echo $POSTGRES_EXPORTER_IP > postgres_exporter_ip.txt
+    - helm install stackdriver-exporter prometheus-community/prometheus-stackdriver-exporter --namespace monitoring --set stackdriver.projectId=$PROJECT_ID --set prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.release=prometheus
+    - helm upgrade prometheus prometheus-community/kube-prometheus-stack -f ./values.yml -n monitoring --set postgresExporterIp=$POSTGRES_EXPORTER_IP
+  artifacts:
+    paths:
+      - postgres_exporter_ip.txt
+  when: manual
+
+configmap-prometheus:
+  extends: .connect-gke
+  stage: install-exporters
+  script: 
+    - kubectl apply -f configmap.yaml
+    - kubectl apply -f prometheus-application.yml
+  when: manual
+
+cert-manager:
+  extends: .connect-gke
+  stage: cert-manager
+  script:
+    - curl -sSL https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz -o helm.tar.gz
+    - tar -zxvf helm.tar.gz
+    - mv linux-amd64/helm /usr/local/bin/helm  
+    - helm repo add jetstack https://charts.jetstack.io
+    - kubectl create namespace cert-manager
+    - helm upgrade --install cert-manager jetstack/cert-manager --namespace cert-manager --set installCRDs=true
+    - kubectl apply -f ./k8s/clusterissuer.yaml
+    - kubectl apply -f ./k8s/certificate.yaml
+  when: manual
+
+ingress:
+  extends: .connect-gke
+  stage: configure-ingress
+  script:
+    - kubectl apply -f ./k8s/newingress.yml
+  when: manual
+

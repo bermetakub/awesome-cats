@@ -1,0 +1,35 @@
+.docker-rule:
+  image: google/cloud-sdk:latest
+  services:
+  - name: docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    BACKEND_IMAGE: awesome-cats-backend
+    FRONTEND_IMAGE: awesome-cats-frontend
+    REPO_URI_BACKEND: gcr.io/$GCP_PROJECT_ID/$BACKEND_IMAGE
+    REPO_URI_FRONTEND: gcr.io/$GCP_PROJECT_ID/$FRONTEND_IMAGE
+    TAG: latest
+    TAG_BACKEND: $REPO_URI_BACKEND:$TAG
+    TAG_FRONTEND: $REPO_URI_FRONTEND:$TAG
+
+  before_script:
+    # Install Docker
+    - apt-get update && apt-get install -y docker.io
+    # Authenticate with Google Cloud
+    - echo $GOOGLE_CREDENTIALS > ${HOME}/gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+    - gcloud config set project $GCP_PROJECT_ID
+    - gcloud auth configure-docker --quiet
+
+build-push-docker-images:
+  extends: .docker-rule
+  stage: build-push
+  script: 
+    # Build and push the first Docker image
+    - docker build -t $TAG_BACKEND -f Docker/awesome_cats_backend/Dockerfile Docker/awesome_cats_backend/
+    - docker push $TAG_BACKEND
+    # Build and push the second Docker image
+    - docker build -t $TAG_FRONTEND -f Docker/awesome_cats_frontend/Dockerfile Docker/awesome_cats_frontend/
+    - docker push $TAG_FRONTEND
+  when: manual

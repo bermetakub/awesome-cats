@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-argo
+  namespace: argocd
+  finalizers: 
+    - resources-finalizers.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/final-project5090436/awesome-application.git
+    targetRevision: HEAD
+    path: mychart
+    helm:
+      parameters:
+        - name: namespace
+          value: default
+  destination: 
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+      allowEmpty: false
+    syncOptions:
+      - Validate=false
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+

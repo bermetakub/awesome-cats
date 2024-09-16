@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme: #Specifies the ACME (Automatic Certificate Management Environment) configuration
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: bermetalymkulova55@gmail.com  
+    privateKeySecretRef:
+      name: letsencrypt-production #Specifies the Kubernetes Secret resource where the ACME account's private key will be stored.
+    solvers: #Defines how cert-manager will solve ACME challenges to prove domain ownership.
+    - http01: #Specifies the HTTP-01 challenge solver
+        ingress: #Specifies that the solver will use an ingress to route the HTTP-01 challenge requests.
+          class: nginx #The ingress class to use

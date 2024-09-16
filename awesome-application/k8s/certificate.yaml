@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: letsencrypt-production
+  namespace: default
+spec:
+  secretName: letsencrypt-production
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  commonName: alymkulovabk.online
+  dnsNames:
+  - alymkulovabk.online

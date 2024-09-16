@@ -1,0 +1,57 @@
+.hidden-terraform-job:
+  image:
+    name: ubuntu:latest
+    entrypoint:
+      - '/usr/bin/env'
+      - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+  before_script:
+    - apt-get update && apt-get install -y curl unzip jq
+    - curl -fsSL https://releases.hashicorp.com/terraform/$(curl -s https://checkpoint-api.hashicorp.com/v1/check/terraform | jq -r .current_version)/terraform_$(curl -s https://checkpoint-api.hashicorp.com/v1/check/terraform | jq -r .current_version)_linux_amd64.zip -o terraform.zip
+    - unzip terraform.zip
+    - mv terraform /usr/local/bin/
+    - apt-get update && apt-get install -y curl 
+    - export GOOGLE_APPLICATION_CREDENTIALS=$CI_PROJECT_DIR/terraform-key.json
+    - echo "$GOOGLE_CREDENTIALS" > "$GOOGLE_APPLICATION_CREDENTIALS"
+    - rm -rf .terraform
+    - cd Terraform
+    - terraform -v
+    - |
+      cat > backend.tf <<EOF
+      terraform {
+        backend "gcs" {
+          bucket  = "tfstate-for-final-project"
+          prefix  = "tfstate"
+        }
+      }
+      EOF
+    - terraform init -reconfigure
+    - curl -LO "https://dl.k8s.io/release/v1.23.0/bin/linux/amd64/kubectl" && chmod +x ./kubectl && mv ./kubectl /usr/local/bin/kubectl
+    # Install gke-gcloud-auth-plugin
+    - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+    - kubectl version --client
+
+# Terraform plan job
+plan:
+  extends: .hidden-terraform-job
+  stage: plan
+  script:
+    - terraform plan -out=tfplan
+  when: manual
+
+# Terraform apply job
+apply:
+  extends: .hidden-terraform-job
+  stage: apply
+  script:
+    - terraform apply -auto-approve
+  when: manual
+
+# Terraform destroy job
+destroy:
+  extends: .hidden-terraform-job
+  stage: destroy
+  script:
+    - terraform destroy -auto-approve
+  when: manual
+

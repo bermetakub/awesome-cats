@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.fullname" . }}-backend-deployment
+  labels:
+  {{- include "mychart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backendDeployment.replicas }}
+  selector:
+    matchLabels:
+      app: backend
+    {{- include "mychart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: backend
+      {{- include "mychart.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - env:
+        - name: PGHOST
+          valueFrom:
+            secretKeyRef:
+              key: hostname
+              name: db-credentials
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: db-credentials
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: db-credentials
+        - name: PGDATABASE
+          valueFrom:
+            secretKeyRef:
+              key: database
+              name: db-credentials
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.backendDeployment.backend.image.repository }}:{{ .Values.backendDeployment.backend.image.tag
+          | default .Chart.AppVersion }}
+        name: backend
+        ports:
+        - containerPort: 3000
+        resources: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.fullname" . }}-frontend-deployment
+  labels:
+  {{- include "mychart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontendDeployment.replicas }}
+  selector:
+    matchLabels:
+      app: frontend
+    {{- include "mychart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: frontend
+      {{- include "mychart.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.frontendDeployment.frontend.image.repository }}:{{ .Values.frontendDeployment.frontend.image.tag
+          | default .Chart.AppVersion }}
+        name: frontend
+        ports:
+        - containerPort: 3000
+        resources: {}

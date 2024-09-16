@@ -1,0 +1,26 @@
+backendDeployment:
+  backend:
+    image:
+      repository: gcr.io/monitoring-433016/awesome-cats-backend
+      tag: latest
+  replicas: 1
+backendService:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 3000
+  type: ClusterIP
+frontendDeployment:
+  frontend:
+    image:
+      repository: gcr.io/monitoring-433016/awesome-cats-frontend
+      tag: latest
+  replicas: 1
+frontendService:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 3000
+  type: ClusterIP
+kubernetesClusterDomain: cluster.local
+

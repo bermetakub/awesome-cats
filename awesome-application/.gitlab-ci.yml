@@ -1,0 +1,18 @@
+include: 
+  - project: 'final-project5090436/templates' 
+    file: 'terraform-template.yml' 
+  - project: 'final-project5090436/templates'
+    file: 'docker-template.yml'
+  - project: 'final-project5090436/templates'
+    file: 'k8s-template.yml'
+stages:
+  - plan
+  - apply
+  - destroy
+  - build-push
+  - create-table
+  - helm-install
+  - configure-argocd
+  - install-exporters
+  - cert-manager
+  - configure-ingress
